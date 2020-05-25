@@ -181,17 +181,15 @@ public class Monitor implements Runnable {
 	private void determineAlarmType() {
 		String alarmType = "";
 		downtime = ((System.nanoTime() - startTime) / 1000000000);
-		if (downtime > consistencyThreshold) {
-			alarmType = "alarm1.wav";
-		}
-		if (isPrime == false) {
-			if (downtime > altReportTime) {
-				alarmType = "alarm2.wav";
+		if (isPrime) {
+			if (downtime > consistencyThreshold) {
+				alarmType = "alarm1.wav";
 			}
-		} else {
 			if (downtime > primeReportTime) {
 				alarmType = "alarm2.wav";
 			}
+		} else if (downtime > altReportTime) {
+			alarmType = "alarm2.wav";
 		}
 		if (!currentAlarm.equals(alarmType)) {
 			if (clip != null) {
