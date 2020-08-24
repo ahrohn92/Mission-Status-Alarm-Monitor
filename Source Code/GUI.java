@@ -28,6 +28,9 @@ import java.util.concurrent.TimeUnit;
 
 public class GUI extends JFrame {
 
+	// Icon
+	ImageIcon icon = new ImageIcon(this.getClass().getClassLoader().getResource("fox.jpg"));
+	
 	// GUI Components
 	private JLabel primeLabel = new JLabel("Are we prime?");
 	private JLabel statusLabel = new JLabel("Status:");
@@ -42,7 +45,7 @@ public class GUI extends JFrame {
 	private JRadioButton noRadioButton = new JRadioButton("No");
 	private ButtonGroup buttonGroup = new ButtonGroup();
 	private JTextField statusColor = new JTextField("",10);
-	private JTextField consistencyThresholdTextField = new JTextField("5",10);
+	private JTextField consistencyThresholdTextField = new JTextField("1",10);
 	private JTextField primeReportTimeTextField = new JTextField("15",10);
 	private JTextField altReportTimeTextField = new JTextField("60",10);
 	private JButton startButton = new JButton("Start");
@@ -55,16 +58,16 @@ public class GUI extends JFrame {
 	private JScrollPane scrollPane = new JScrollPane(textArea);
 	
 	// Local Variables
-	private boolean isPrime;
-	private boolean isPrevPrime;
 	private double consistencyThreshold = 0;
 	private double primeReportTime = 0;
 	private double altReportTime = 0;
+	private long startTime;
+	private int monitorRunTime = 0;
+	private boolean isPrime, isPrevPrime;
 	private boolean hasAlreadyBeenStarted = false;
 	private boolean isMonitorRestart = false;
 	private boolean run = false;
-	private long startTime;
-	private int monitorRunTime = 0;
+	private boolean isDiagMode = false;
 	private static Monitor monitor;
 	private Status lastStatus;
 	
@@ -209,7 +212,10 @@ public class GUI extends JFrame {
 									startMonitor(isPrime, isPrevPrime, consistencyThreshold, primeReportTime, altReportTime, hasAlreadyBeenStarted);
 									run = true;
 									hasAlreadyBeenStarted = true;
-									setTitle("Mission Status Alarm Monitor (Running)");
+									if (monitor != null) {
+										monitor.acknowledgeAlarm();
+									}
+									setTitle("Mission Status Alarm Monitor (Starting)");
 									consistencyThresholdTextField.setEditable(false);
 									primeReportTimeTextField.setEditable(false);
 									altReportTimeTextField.setEditable(false);
@@ -220,11 +226,11 @@ public class GUI extends JFrame {
 								}
 							}
 						} catch (NumberFormatException nfe) {
-							JOptionPane.showMessageDialog(null, "Invalid User Input\nPlease enter a valid number (ex: 35).", "ERROR", JOptionPane.ERROR_MESSAGE);
+							JOptionPane.showMessageDialog(null, "Invalid User Input\nPlease enter a valid number (ex: 15).", "ERROR", JOptionPane.ERROR_MESSAGE);
 						}
 					}
 				} else {
-					JOptionPane.showMessageDialog(null, "The monitor is already running.", "ERROR", JOptionPane.ERROR_MESSAGE);
+					JOptionPane.showMessageDialog(null, "The monitor is already running.", null, JOptionPane.PLAIN_MESSAGE);
 				}
 			}
         });
@@ -232,7 +238,13 @@ public class GUI extends JFrame {
         // Stop Button
         stopButton.addActionListener(new ActionListener() {
 			public void actionPerformed(ActionEvent e) {
-				stopMonitor();
+				if (getTitle().contains("Starting") || getTitle().contains("Restarting")) {
+					JOptionPane.showMessageDialog(null, "The monitor is starting.\n"
+							+ "Wait until the monitor has started to stop it.", null, JOptionPane.PLAIN_MESSAGE);
+				} else {
+					setTitle("Mission Status Alarm Monitor (Stopped)");
+					stopMonitor();
+				}				
 			}
         });
         
@@ -271,7 +283,7 @@ public class GUI extends JFrame {
 						} else {
 							datesAreValid = true;
 							try {
-								FileReader reader = new FileReader("C:/Users/Matthew/Desktop/Work Projects/Mission Status Alarm Monitor/FAM/log.txt");
+								FileReader reader = new FileReader("C:/Users/Matthew/Desktop/Projects/Work Projects/Mission Status Alarm Monitor/FAM/log.txt");
 								BufferedReader bufferedReader = new BufferedReader(reader);
 								String logEntries = "";
 								String line;
@@ -332,10 +344,10 @@ public class GUI extends JFrame {
         // Test Alarm Button
         testButton.addActionListener(new ActionListener() {
 			public void actionPerformed(ActionEvent e) {
-				if (monitor != null) {
+				if (monitor != null && monitor.getRun()) {
 					monitor.testAlarm("alarm1.wav");
 				} else {
-					JOptionPane.showMessageDialog(null, "Monitor must be running to test alarm.", null, JOptionPane.PLAIN_MESSAGE);
+					JOptionPane.showMessageDialog(null, "The monitor must be running to test the alarm.", null, JOptionPane.PLAIN_MESSAGE);
 				}
 			}
         });
@@ -349,17 +361,20 @@ public class GUI extends JFrame {
 					altReportTimeTextField.setText("");
 				} else {
 					JOptionPane.showMessageDialog(null, "Alarm settings cannot be changed while monitor is running."
-							+ "\nIf you would like to make changes, the monitor must be stopped first.", "ERROR", JOptionPane.ERROR_MESSAGE);
+							+ "\nIf you would like to make changes, the monitor must be stopped first.", null, JOptionPane.PLAIN_MESSAGE);
 				}
 			}
         });
         
         // Fills System Log w/ Prior Log Entries in log.txt File
         try {
-			textArea.setText(new String(Files.readAllBytes(Paths.get("C:/Users/Matthew/Desktop/Work Projects/Mission Status Alarm Monitor/FAM/log.txt")), StandardCharsets.UTF_8));
+			textArea.setText(new String(Files.readAllBytes(Paths.get("C:/Users/Matthew/Desktop/Projects/Work Projects/Mission Status Alarm Monitor/FAM/log.txt")), StandardCharsets.UTF_8));
 		} catch (IOException e1) {
-			JOptionPane.showMessageDialog(null, "Prior log entries could not be read from log file.", "ERROR", JOptionPane.ERROR_MESSAGE);
+			JOptionPane.showMessageDialog(null, "Prior log entries could not be read from the log file.", "ERROR", JOptionPane.ERROR_MESSAGE);
 		}
+        
+        // Sets Icon for Program
+        setIconImage(icon.getImage());
 	}
 	
 	/*
@@ -382,9 +397,13 @@ public class GUI extends JFrame {
 					monitor.setStartTime(startTime);
 				}
 				TimeUnit.MILLISECONDS.sleep(15000);
+				setTitle("Mission Status Alarm Monitor (Running)");
 				while (run) {
-					if (monitorRunTime >= 604800) {
+					if (monitorRunTime >= 604800 && monitor.getStatus() != Status.DOWN) { // 604800
 						isMonitorRestart = true;
+						stopMonitor();
+					} else if (monitor.pageHasChanged) {
+						isDiagMode = true;
 						stopMonitor();
 					} else {
 						TimeUnit.MILLISECONDS.sleep(1000);
@@ -409,7 +428,7 @@ public class GUI extends JFrame {
 						textArea.setCaretPosition(textArea.getDocument().getLength());
 					}
 				}
-				if (run) {
+				if (run && getTitle().contains("Running")) {
 					if (monitor.getStatus() == Status.NORMAL) {
 						statusText.setText("NORMAL");
 						statusColor.setBackground(Color.GREEN);
@@ -435,13 +454,7 @@ public class GUI extends JFrame {
 					packetLossText.setText("");
 				}
 			}
-
-			// Message Appears if Monitor is Stopped
-			protected void done() {
-				if (!isMonitorRestart) {
-					JOptionPane.showMessageDialog(null, "The Mission Status Alarm Monitor has stopped.", null, JOptionPane.PLAIN_MESSAGE);
-				}
-			}
+			protected void done() {}
 		};
 		worker.execute();
 	}
@@ -459,11 +472,14 @@ public class GUI extends JFrame {
 				isPrevPrime = monitor.isPrime();
 				lastStatus = monitor.getStatus();
 				startTime = monitor.getStartTime();
+				monitor.acknowledgeAlarm();
 				monitor.setRun(false);
-				if (!isMonitorRestart) {
+				if (!isMonitorRestart && !isDiagMode) {
 					monitor.testAlarm("alarm3.wav");
 				}
-//				monitor.getDriver().close();
+				if (!isDiagMode) {
+					monitor.getDriver().close();
+				}
 			}
 			if (!isMonitorRestart) {
 				setTitle("Mission Status Alarm Monitor (Stopped)");
@@ -472,7 +488,32 @@ public class GUI extends JFrame {
 				altReportTimeTextField.setEditable(true);
 				yesRadioButton.setEnabled(true);
 				noRadioButton.setEnabled(true);
+				if (!isDiagMode) {
+					JOptionPane.showMessageDialog(null, "The monitor has been stopped.", null, JOptionPane.WARNING_MESSAGE);
+				} else {					
+					int input = JOptionPane.showOptionDialog(null, "You have left the IOplex ping screen that this program monitors.\n"
+							+ "The monitor has been temporarily stopped and put in Diagnostic Mode so you can do troubleshooting.\n"
+							+ "Once you are done troubleshooting, press the 'OK' button to restart the monitor.", "Diagnostic Mode", JOptionPane.DEFAULT_OPTION, JOptionPane.WARNING_MESSAGE, null, null, null);
+
+					if (input == JOptionPane.OK_OPTION) {
+						setTitle("Mission Status Alarm Monitor (Restarting)");
+						if (monitor.getDriver() != null) {
+							if (monitor.isWebBrowserOpen()) {
+								monitor.getDriver().close();
+							}
+						}
+						try {
+							startMonitor(isPrime, isPrevPrime, consistencyThreshold, primeReportTime, altReportTime, hasAlreadyBeenStarted);
+							run = true;
+						} catch (Exception e1) {
+							JOptionPane.showMessageDialog(null, "Mission Status Alarm Monitor was unable to start.", "ERROR", JOptionPane.ERROR_MESSAGE);
+						}
+						isDiagMode = false;
+						monitor.pageHasChanged = false;
+					}
+				}
 			} else {
+				setTitle("Mission Status Alarm Monitor (Restarting)");
 				try {
 					startMonitor(isPrime, isPrevPrime, consistencyThreshold, primeReportTime, altReportTime, hasAlreadyBeenStarted);
 					run = true;
@@ -488,7 +529,7 @@ public class GUI extends JFrame {
 	// Updates log.txt File w/ New Entries
 	private void updateLog(String logUpdate) {
 		try {
-			FileWriter writer = new FileWriter("C:/Users/Matthew/Desktop/Work Projects/Mission Status Alarm Monitor/FAM/log.txt", true);
+			FileWriter writer = new FileWriter("C:/Users/Matthew/Desktop/Projects/Work Projects/Mission Status Alarm Monitor/FAM/log.txt", true);
 			writer.append(logUpdate);
 			writer.close();
 		} catch (IOException e) {

@@ -27,25 +27,21 @@ import org.openqa.selenium.ie.InternetExplorerDriver;
 
 public class Monitor implements Runnable {
 	
-	// Local Variables	
+	// Local Variables
 	private Thread thread = new Thread(this);
 	private String prevPacketLoss = "";
 	private String currentPacketLoss = "";
 	private String logUpdate = "";
 	private String currentAlarm = "";
-	private boolean isPrime;
-	private double consistencyThreshold;
-	private double primeReportTime;
-	private double altReportTime;
-	private long startTime;
-	private long downtime;
+	private double consistencyThreshold, primeReportTime, altReportTime;
+	private long startTime, downtime;
+	private boolean isPrime, hasAlreadyBeenStarted;
 	private boolean run = true;
 	private boolean newAlarm = false;
 	private boolean alarmIsActive = false;
 	private boolean isInitialScan = true;
-	private boolean hasAlreadyBeenStarted;
-	private Status prevStatus;
-	private Status currentStatus;
+	public boolean pageHasChanged = false;
+	private Status prevStatus, currentStatus;
 	private SimpleDateFormat dateFormat;
 	private Clip clip;
 	private WebDriver driver;
@@ -72,11 +68,42 @@ public class Monitor implements Runnable {
 		thread.start();
 	}
 	
+	// Starts Selenium IE Web Driver
+	private void startWebDriver() throws InterruptedException, AWTException {
+		if (driver == null) {
+			Robot robot = new Robot();
+			System.setProperty("webdriver.ie.driver", "C:/Users/Andrew Rohn/Desktop/Projects/Work Projects/Mission Status Alarm Monitor/FAM/IEDriverServer.exe");
+			driver = new InternetExplorerDriver();
+			driver.get("https://192.168.1.51/index.html");
+			driver.findElement(By.id("overridelink")).click();
+			robot.delay(1000);
+			robot.keyPress(KeyEvent.VK_ENTER);
+			robot.keyRelease(KeyEvent.VK_ENTER);
+			TimeUnit.SECONDS.sleep(1);
+			driver.findElement(By.id("bannerAccept")).click();
+			WebElement userElement = driver.findElement(By.id("user_name"));
+			userElement.click();
+			userElement.sendKeys("ioplex");
+			WebElement passElement = driver.findElement(By.id("password"));
+			passElement.click();
+			passElement.sendKeys("ioplex");
+			driver.findElement(By.id("Submit_")).click();
+			TimeUnit.SECONDS.sleep(1);
+			driver.findElement(By.linkText("Diagnostic")).click();
+			TimeUnit.SECONDS.sleep(1);
+			driver.findElement(By.linkText("Ping")).click();
+			WebElement ipAddrElement = driver.findElement(By.id("ipAddr"));
+			ipAddrElement.click();
+			ipAddrElement.sendKeys("172.16.11.65");
+		}
+	}
+	
 	@Override
+	// Monitor Thread
 	public void run() {
 		String receivedData = "";
 		while (run) {
-			receivedData = pingIOplex();
+			receivedData = interfaceWithSelenium();			
 			currentStatus = determineStatus(receivedData);
 			if (isInitialScan) {
 				prevStatus = currentStatus;
@@ -87,7 +114,38 @@ public class Monitor implements Runnable {
 		}
 	}
 	
-	// Pings IOplex 
+	// Interfaces w/ Selenium IE Web Driver to Access IOplex Software
+	private String interfaceWithSelenium() {
+		String receivedData = "";
+		
+		if (isWebBrowserOpen()) {
+			if (driver.getCurrentUrl().contains("https://192.168.1.51/ping.html")) {
+				receivedData = pingIOplex();
+			} else {
+				pageHasChanged = true;
+			}
+		} else {
+			driver = null;
+			try {
+				startWebDriver();
+			} catch (InterruptedException | AWTException e) {
+				e.printStackTrace();
+			}
+		}
+		return receivedData;
+	}
+	
+	// Determines If Web Browser is Open
+	public boolean isWebBrowserOpen() {
+		try {
+			driver.getTitle();
+			return true;
+		} catch (Exception e) {
+			return false;
+		}
+	}
+	
+	// Pings IOplex
 	private String pingIOplex() {
 		String receivedData = "";
 		driver.findElement(By.id("ViewBut")).click();
@@ -163,6 +221,15 @@ public class Monitor implements Runnable {
 					clip.close();
 					alarmIsActive = false;
 				}
+				if ((isPrime && downtime > primeReportTime) || (!isPrime && downtime > altReportTime)) {
+					if (clip != null) {
+						clip.close();
+					}
+					alarmIsActive = false;
+					testAlarm("alarm4.wav");
+					alarmIsActive = false;
+					newAlarm = false;
+				}
 			}
 		}
 		if (currentStatus == Status.DEGRADED && currentPacketLoss != prevPacketLoss) {
@@ -206,11 +273,13 @@ public class Monitor implements Runnable {
 	private void soundAlarm(String alarm) {
 		if (!alarm.equals("") && !alarmIsActive && newAlarm) {
 			try {
-				File musicPath = new File("C:/Users/Matthew/Desktop/Work Projects/Mission Status Alarm Monitor/FAM/"+alarm);
+				File musicPath = new File("C:/Users/Matthew/Desktop/Projects/Work Projects/Mission Status Alarm Monitor/FAM/"+alarm);
 				AudioInputStream audioInput = AudioSystem.getAudioInputStream(musicPath);
 				clip = AudioSystem.getClip();
 				clip.open(audioInput);
-				clip.loop(Clip.LOOP_CONTINUOUSLY);
+				if (!alarm.equals("alarm3.wav") && !alarm.equals("alarm4.wav")) {
+					clip.loop(Clip.LOOP_CONTINUOUSLY);
+				}
 				clip.start();
 				alarmIsActive = true;
 			} catch (Exception e) {
@@ -229,7 +298,7 @@ public class Monitor implements Runnable {
 		}
 	}
 	
-	// Tests Alarms
+	// Tests Alarm
 	public void testAlarm(String alarm) {
 		newAlarm = true;
 		soundAlarm(alarm);
@@ -277,34 +346,6 @@ public class Monitor implements Runnable {
 		return formattedDowntime;
 	}
 	
-	// Starts IE Web Driver Logs Into IOplex w/ Script
-	private void startWebDriver() throws InterruptedException, AWTException {
-		Robot robot = new Robot();
-		System.setProperty("webdriver.ie.driver", "C:/Users/Matthew/Desktop/Work Projects/Mission Status Alarm Monitor/FAM/IEDriverServer.exe");
-		driver = new InternetExplorerDriver();
-		driver.get("https://192.168.1.51/index.html");
-		driver.findElement(By.id("overridelink")).click();
-		robot.delay(1000);
-		robot.keyPress(KeyEvent.VK_ENTER);
-		robot.keyRelease(KeyEvent.VK_ENTER);
-		TimeUnit.SECONDS.sleep(1);
-		driver.findElement(By.id("bannerAccept")).click();
-		WebElement userElement = driver.findElement(By.id("user_name"));
-		userElement.click();
-		userElement.sendKeys("ioplex");
-		WebElement passElement = driver.findElement(By.id("password"));
-		passElement.click();
-		passElement.sendKeys("ioplex");
-		driver.findElement(By.id("Submit_")).click();
-		TimeUnit.SECONDS.sleep(1);
-		driver.findElement(By.linkText("Diagnostic")).click();
-		TimeUnit.SECONDS.sleep(1);
-		driver.findElement(By.linkText("Ping")).click();
-		WebElement ipAddrElement = driver.findElement(By.id("ipAddr"));
-		ipAddrElement.click();
-		ipAddrElement.sendKeys("172.16.11.65");
-	}
-	
 	/*
 	 * Setter and Getter Methods
 	 */
@@ -325,6 +366,11 @@ public class Monitor implements Runnable {
 		prevStatus = status;
 	}
 	
+	// Returns Run Variable
+	public boolean getRun() {
+		return run;
+	}
+	
 	// Returns Start Time
 	public long getStartTime() {
 		return startTime;
@@ -337,6 +383,7 @@ public class Monitor implements Runnable {
 		return temp;
 	}
 	
+	// Returns isPrime Variable
 	public boolean isPrime() {
 		return isPrime;
 	}
